@@ -3,8 +3,10 @@ ilastik Mother Machine Python protocol
 
 
 
-Three files are included in this GitHub: 
 
-    - The .docx file contains a step-by-step protocol detailing the iMMPY protocol. 
-    - The .py script is the python code required to analyse and extract data from ilastik masks.  
-    - The .zip file contains example data and masks.
+    - iMMPY_Protocol.docx is amicrosoft word file that contains the step-by-step protocol detailing the steps 
+         from raw data to output. 
+    - iMMPY_Script_User.py is the python code required to analyse and extract data from ilastik masks.  
+    - Example_Data contains example data and masks if users want to try out the iMMPY protocol. 
+         Please note that this data is from a low-quality falied experiment, as we did not have permission to publish 
+         higher-quality data before it was peer-reviewed.
