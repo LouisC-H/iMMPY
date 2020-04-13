@@ -83,10 +83,9 @@ def main(Input_file_paths):
     #Sets up an empty dictionary which will contain all data from this dataset.
     Data_Dict = {}
     
-    #for each frame.
+    #For each frame of the images.
     for index in tqdm(range(Imagelist[0].shape[0])):
-        Data_Dict = process_frame(index, Imagelist[0][index], Imagelist[1][index],Imagelist[2][index], Data_Dict)
-        raise NameError("stop")
+         Data_Dict = process_frame(index, Imagelist[0][index], Imagelist[1][index],Imagelist[2][index], Data_Dict)
 
     return Data_Dict
 
@@ -115,35 +114,36 @@ def prep_data(Input_file_paths):
 
     # Load data from their tiffs
     fluoimage = skio.imread(Input_file_paths[0])
-    Imask_image = skio.imread(Input_file_paths[1])
+    imask_image = skio.imread(Input_file_paths[1])
     Wells_image = skio.imread(Input_file_paths[2])
     
-    if Wells_image.shape[0] != Imask_image.shape[0] != fluoimage.shape[0]:
-        raise NameError("Error: Brightfield, Fluorescence, Ilastik Masks and Wells don't all have the same number of frames")
+    if Wells_image.shape[0] != imask_image.shape[0] != fluoimage.shape[0]:
+        raise NameError("Error: Brightfield, Fluorescence, ilastik Masks and Wells don't all have the same number of frames")
         
-    #prepare wells mask
-    Wells = prep_wells(Wells_image)
+    #Prepare wells mask
+    Wells = prep_wells(Wells_image,fluoimage)
 
-    #prepare ilastik mask
+    #Prepare ilastik mask
     edgedist = 2
-    Imask = trim_imasks(Imask_image,edgedist)
-    Imask = imask_check_wells(Imask,Wells)
+    imask = trim_imasks(imask_image,edgedist)
+    imask = imask_check_wells(imask,Wells)
 
-    Imagelist = [fluoimage,Imask,Wells]
+    Imagelist = [fluoimage,imask,Wells]
 
     return(Imagelist)
 
-def prep_wells(Wells_image):
+def prep_wells(Wells_image, fluoimage):
     '''
     Turns the manually generated wells mask into a binary image. As different drawring methods can end up 
     creating masks either the  or background labelled as zero, this function tests both scenarios 
     (only on the first frame, as it is expected that the same method will be maintained throughout).
-    
 
     Parameters
     ----------
     Wells_image : numpy.ndarray
         This array is the array of pixels that makes up the manually-generated well mask
+    fluoimage : numpy.ndarray
+        Fluorescence image stack.
 
     Returns
     -------
@@ -153,64 +153,166 @@ def prep_wells(Wells_image):
 
     '''
 
-    Wells_v1 = Wells_image[0] < 0.5
-    Wells_v2 = Wells_image[0] > 0.5
+    Wells_v1 = Wells_image < 0.5
+    Wells_v2 = Wells_image > 0.5
 
     # Convert the binary (True/False) mask to a labelled array where each
-    # connected group of nonzero pixels gets assigned a unique number
+    #   connected group of nonzero pixels gets assigned a unique number
     Wells_v1_labels= measure.label(Wells_v1)
     Wells_v2_labels= measure.label(Wells_v2)
 
-    #Compare which version has more unique wells
+    #Compare which version has more unique wells and set that one as the master version
     if len(np.unique(Wells_v1_labels))> len(np.unique(Wells_v2_labels)):
         Wells_binary = Wells_image < 0.5
     else: 
         Wells_binary = Wells_image > 0.5
-
+    
+    check_wells_duplicate(Wells_binary, fluoimage)
+    
     return Wells_binary
 
-def imask_check_wells(Imask,Wells):
+def check_wells_duplicate(Wells, fluoimage):
+    '''
+    Checks well numbers across each frame to spot inconsistent numbers of well, 
+    and determine if the wells need to be duplicated
+
+    Parameters
+    ----------
+    Wells : numpy.ndarray
+        The manually-generated well mask.
+    fluoimage : numpy.ndarray
+        The experimentally-derived fluorescent image. Only here to make regionprops work
+
+    Returns
+    -------
+    Wells : numpy.ndarray
+        The manually-generated well mask.
+
+    '''
+    master_frame_well_number = -1
+    master_frame_frame_number = -1
+    Duplicate_wells_bool = True
+    #For each frame
+    for frame in range(Wells.shape[0]):
+        #Measure the number of wells in the frame
+        wells_labels= measure.label(Wells[frame])
+        wellnum = len(np.unique(wells_labels)) - 1
+        #If there's only one: pass
+        if wellnum == 1:
+            pass
+        #If there's none, there's an error
+        elif wellnum < 1:
+            raise(NameError(f"Warning: frame {frame} has {wellnum} wells marked"))
+        #If there's more than one:
+        else:
+            # If this is the first non-one frame, record it's index and its number of wells
+            if master_frame_well_number == -1:
+                master_frame_well_number = wellnum
+                master_frame_frame_number = frame
+            #If this isn't the first time, check if the number of wells are conserved
+            else:
+                Duplicate_wells_bool = False
+                if wellnum == master_frame_well_number:
+                    pass
+                else:
+                    print(f"Warning: number of wells inconsistent across frames. See frames {master_frame_frame_number} and {frame}")
+    
+    # If there was only one frame with more than one well in it, duplicate it into the other frames
+    if Duplicate_wells_bool == True:
+        Wells = duplicate_wells(Wells, fluoimage, master_frame_frame_number)
+
+    return(Wells)
+
+def duplicate_wells(Wells, fluoimage, master_frame_frame_number):
+    '''
+    Duplicates a single frame's wells onto every other frame, transforming it to account for frameshift
+
+    Parameters
+    ----------
+    Wells : numpy.ndarray
+        The manually-generated well mask.
+    fluoimage : numpy.ndarray
+        The experimentally-derived fluorescent image. Only here to make regionprops work
+    master_frame_frame_number : integer
+        The frame index of the master frame.
+
+    Returns
+    -------
+    Wells : numpy.ndarray
+        The manually-generated well mask.
+
+    '''
+    print(f"Duplicating wells from frame {master_frame_frame_number}")
+    
+    #The master frame is the single multi-welled frame to be copied from.    
+    master_frame = Wells[master_frame_frame_number]
+    
+    #Order the wells and measure the leftmost one's centroid position
+    mf_labels = measure.label(master_frame)
+    mf_properties = measure.regionprops(mf_labels, fluoimage[master_frame_frame_number])
+    
+    mf_wells_sorted = orderwells(mf_properties, mf_labels)
+    mf_props_sorted = measure.regionprops(mf_wells_sorted, fluoimage[master_frame_frame_number])
+    
+    mf_well1_centroid = mf_props_sorted[0].centroid
+    
+    #For each frame
+    for frame in range(Wells.shape[0]):
+        #If the frame isn't the master frame
+        if frame != master_frame_frame_number:
+            #Determine the position of the single well's centroid
+            frame_label = measure.label(Wells[frame])
+            frame_well_props = measure.regionprops(frame_label, fluoimage[frame])[0]
+            frame_well_centroid = frame_well_props.centroid
+            #Displace the master frame so that its first well overlapps with this frame's well
+            dy = frame_well_centroid[0]  - mf_well1_centroid[0] 
+            dx =  frame_well_centroid[1] - mf_well1_centroid[1] 
+            Wells[frame] = translate_matrix(Wells[master_frame_frame_number], dx, dy)
+    
+    return(Wells)
+
+def imask_check_wells(imask,Wells):
     '''
     Deletes any bacteria that fall outside of the manually-drawn wells
 
     Parameters
     ----------
-    Imask : numpy.ndarray
+    imask : numpy.ndarray
         ilastik-generated mask that shows each bacterium's positions on each frame.
     Well : numpy.ndarray
         manually-generated mask that shows each well's position on each frame.
 
     Returns
     -------
-    Imask: numpy.ndarray
+    imask: numpy.ndarray
         ilastik-generated mask that shows each bacterium's positions on each frame.
 
     '''
    
-    all_bac = np.unique(Imask)
-    #for each frame
-    for i in range(Imask.shape[0]):
-        Imask_frame = Imask[i]
+    all_bac = np.unique(imask)
+    #For each frame
+    for i in range(imask.shape[0]):
+        imask_frame = imask[i]
         Well_frame = Wells[i]
-        #find each bacterium that intersects with a well in this frame
-        bac_in_wells_ilastik = np.unique(Imask_frame[Well_frame!=0])
-        #for each bacterium
+        #Find each bacterium that intersects with a well in this frame
+        bac_in_wells_ilastik = np.unique(imask_frame[Well_frame!=0])
+        #For each bacterium
         for bac in all_bac:
-            #if the bacterium does not intersect with a well in this frame
+            #If the bacterium does not intersect with a well in this frame
             if bac not in bac_in_wells_ilastik:
-                #delete the bacterium (set its pixels to 0: the number of the background layer)
-                bacarea = Imask_frame== bac
-                Imask[i][bacarea]=0
-    return(Imask)
+                #Delete the bacterium (set its pixels to 0: the number of the background layer)
+                bacarea = imask_frame== bac
+                imask[i][bacarea]=0
+    return(imask)
 
-def trim_imasks(Imask,edgedist):
+def trim_imasks(imask,edgedist):
     '''
     Deletes any bacteria that come within {edgedist} pixels of the edge of the image
 
     Parameters
     ----------
-    Imask : numpy.ndarrays
-        Ilastik-generated mask.
+    imask : numpy.ndarrays
+        ilastik-generated mask.
     edgedist : integer
         The function will delete any bacteria that come within this many pixels of the edge of the image.
 
@@ -219,28 +321,28 @@ def trim_imasks(Imask,edgedist):
     None.
 
     '''
-    #Find the number of frames and x and y dimensions of the Imask mask
-    numframes,maxy,maxx=Imask.shape
-    #for each frame
+    #Find the number of frames and x and y dimensions of the imask mask
+    numframes,maxy,maxx=imask.shape
+    #For each frame
     for i in range(numframes):
-        #find each bacterium that comes within {edgedist} pixels of the edge of the image
-        uedge = np.unique(Imask[i,edgedist,:])
-        ledge = np.unique(Imask[i,:,edgedist])
-        redge = np.unique(Imask[i,maxy-edgedist,:])
-        dedge = np.unique(Imask[i,:,maxx-edgedist])
+        #Find each bacterium that comes within {edgedist} pixels of the edge of the image
+        uedge = np.unique(imask[i,edgedist,:])
+        ledge = np.unique(imask[i,:,edgedist])
+        redge = np.unique(imask[i,maxy-edgedist,:])
+        dedge = np.unique(imask[i,:,maxx-edgedist])
         alledge = np.concatenate((uedge, ledge,redge,dedge), axis=None)
-        #condense into a single list
+        #Condense into a single list
         edgebaclist = np.unique(alledge)  
         
-        #for each bacterium that comes within {edgedist} pixels of the edge of the image
+        #For each bacterium that comes within {edgedist} pixels of the edge of the image
         for bac in edgebaclist:
-            #delete the bacterium (set its pixels to 0: the number of the background layer)
-            bacarea = Imask[i] == bac
-            Imask[i][bacarea]=0
+            #Delete the bacterium (set its pixels to 0: the number of the background layer)
+            bacarea = imask[i] == bac
+            imask[i][bacarea]=0
                         
-    return(Imask)
+    return(imask)
     
-def process_frame(index, fluoimage, Imask, Wells, Data_Dict):
+def process_frame(index, fluoimage, imask, Wells, Data_Dict):
     '''
     Call the functions involved in processing each individual frame of the images.
 
@@ -250,7 +352,7 @@ def process_frame(index, fluoimage, Imask, Wells, Data_Dict):
         The frame number.
     fluoimage : numpy.ndarray
         Single frame of fluorescent image stack.
-    Imask : numpy.ndarray
+    imask : numpy.ndarray
         Single frame of ilatik-generated bacterial mask.
     Wells : numpy.ndarray
         Single frame of manually-generated well mask.
@@ -266,7 +368,7 @@ def process_frame(index, fluoimage, Imask, Wells, Data_Dict):
 
     [Wells_labels, props_Wells] = wells_props(Wells, fluoimage)
 
-    Data_Dict = image_data(Imask, Wells, fluoimage, Wells_labels, props_Wells, index, Data_Dict)
+    Data_Dict = image_data(imask, fluoimage, Wells_labels, props_Wells, index, Data_Dict)
 
     return(Data_Dict)
 
@@ -293,13 +395,13 @@ def wells_props(Wells,fluoimage):
     #Give each well a unique label
     Wells_labels= measure.label(Wells)
     
-    #calculate properties of wells
+    #Calculate properties of wells
     props_Wells = measure.regionprops(Wells_labels, fluoimage)
     
     #Order wells labours by mean X position
     Wells_labels_sorted = orderwells(props_Wells, Wells_labels)
     
-    #calculate properties of wells, which are now ordered
+    #Calculate properties of wells, which are now ordered
     props_Wells = measure.regionprops(Wells_labels_sorted, fluoimage)
     
     return(Wells_labels_sorted, props_Wells)
@@ -318,7 +420,7 @@ def orderwells(props_Wells, Wells_labels):
     Returns
     -------
     Wells_labels_sorted: numpy.ndarray
-        Mask of wells, whose labels are ordered by x position, from left to right
+        Mask of wells, whose labels are ordered by x position, from left = 1 to right = max (0 is the background)
 
     '''
     #Get a list of each well's mean X position
@@ -332,14 +434,14 @@ def orderwells(props_Wells, Wells_labels):
 
     return(Wells_labels_sorted)
 
-def image_data(Imask,fluoimage, Wells_labels, props_Wells, index, Data_Dict):
+def image_data(imask,fluoimage, Wells_labels, props_Wells, index, Data_Dict):
     '''
     Now that all of the masks are prepared, this function overlays them to the experimental fluorescence images
     and collects data, saving it in a nested dictionary
 
     Parameters
     ----------
-    Imask : numpy.ndarray
+    imask : numpy.ndarray
         ilastik-derived bacterial mask.
     fluoimage : numpy.ndarray
         Experimentally-derived fluorescence image.
@@ -359,7 +461,7 @@ def image_data(Imask,fluoimage, Wells_labels, props_Wells, index, Data_Dict):
 
     '''
     #Determine the prescence of an empty well, as well as some of its properties
-    Empty_well,Empty_well_x,Half_well_dx = empty_well_props(Wells_labels, props_Wells, Imask)
+    Empty_well,Empty_well_x,Half_well_dx = empty_well_props(Wells_labels, props_Wells, imask)
     
     #Set up an empty dictionary that will contain all of the data for this frame
     Frame_dict={}
@@ -370,61 +472,61 @@ def image_data(Imask,fluoimage, Wells_labels, props_Wells, index, Data_Dict):
         #Create a dictionary to store this well's bacteria's data
         Frame_dict[f"Well_{well}"] = {}
 
-        #For each Ilastik-identified bacterium in the well
-        bac_in_well_ilastik = np.unique(Imask[Wells_labels==well])[1:]
+        #For each ilastik-identified bacterium in the well
+        bac_in_well_ilastik = np.unique(imask[Wells_labels==well])[1:]
         for bac in bac_in_well_ilastik:
 
             #Read the bacterium's properties
-            standard_bac_mask_Ilastik = Imask==bac
-            Imasc_bac_prop = measure.regionprops(standard_bac_mask_Ilastik.astype(int), fluoimage)[0]
+            standard_bac_mask_ilastik = imask==bac
+            Imasc_bac_prop = measure.regionprops(standard_bac_mask_ilastik.astype(int), fluoimage)[0]
             
             #Find save properties of each object: intensity, height and length
-            Ilastik_bac_intensity = Imasc_bac_prop.mean_intensity
+            ilastik_bac_intensity = Imasc_bac_prop.mean_intensity
             Ilastic_bac_bbox = Imasc_bac_prop.bbox
             Ilastic_bac_length = Ilastic_bac_bbox[3] - Ilastic_bac_bbox[1]
-            Ilastik_bac_height = Ilastic_bac_bbox[2] - Ilastic_bac_bbox[0]
+            ilastik_bac_height = Ilastic_bac_bbox[2] - Ilastic_bac_bbox[0]
             
             #Save these to the dictionary
-            Frame_dict[f"Well_{well}"]["Ilastik_bac_{}_intensity".format(bac)] = Ilastik_bac_intensity
-            Frame_dict[f"Well_{well}"]["Ilastik_{}_height".format(bac)] = Ilastik_bac_height
-            Frame_dict[f"Well_{well}"]["Ilastik_{}_length".format(bac)] = Ilastic_bac_length
+            Frame_dict[f"Well_{well}"]["ilastik_bac_{}_intensity".format(bac)] = ilastik_bac_intensity
+            Frame_dict[f"Well_{well}"]["ilastik_{}_height".format(bac)] = ilastik_bac_height
+            Frame_dict[f"Well_{well}"]["ilastik_{}_length".format(bac)] = Ilastic_bac_length
             
             #If there is an empty well, continue to more complex analyses
             if Empty_well != -1:
                 
                 #Translate the bacterium horizontally to the centre of the empty channel
                 empty_dx = Empty_well_x - Imasc_bac_prop.centroid[1]
-                empty_bac_mask_Ilastik = translate_matrix(standard_bac_mask_Ilastik, empty_dx, 0)
+                empty_bac_mask_ilastik = translate_matrix(standard_bac_mask_ilastik, empty_dx, 0)
                 
                 #Record the intensity at this region of an empty channel
-                empty_bac_props_Imask = measure.regionprops(empty_bac_mask_Ilastik, fluoimage)
-                Ilastik_empty_intensity = empty_bac_props_Imask[0].mean_intensity
+                empty_bac_props_imask = measure.regionprops(empty_bac_mask_ilastik, fluoimage)
+                ilastik_empty_intensity = empty_bac_props_imask[0].mean_intensity
                 
                 #Also record the intensity in between two channels, in the pdms of the chip
-                pdms_bac_mask_Ilastik = translate_matrix(standard_bac_mask_Ilastik, empty_dx + Half_well_dx ,0)
-                pdms_bac_props_Imask = measure.regionprops(pdms_bac_mask_Ilastik, fluoimage)
-                Ilastik_pdms_intensity = pdms_bac_props_Imask[0].mean_intensity
+                pdms_bac_mask_ilastik = translate_matrix(standard_bac_mask_ilastik, empty_dx + Half_well_dx ,0)
+                pdms_bac_props_imask = measure.regionprops(pdms_bac_mask_ilastik, fluoimage)
+                ilastik_pdms_intensity = pdms_bac_props_imask[0].mean_intensity
                 
                 #Save these to the dictionary
-                Frame_dict[f"Well_{well}"]["Ilastik_empty_{}_intensity".format(bac)]= Ilastik_empty_intensity
-                Frame_dict[f"Well_{well}"]["Ilastik_pdms_{}_intensity".format(bac)]= Ilastik_pdms_intensity
+                Frame_dict[f"Well_{well}"]["ilastik_empty_{}_intensity".format(bac)]= ilastik_empty_intensity
+                Frame_dict[f"Well_{well}"]["ilastik_pdms_{}_intensity".format(bac)]= ilastik_pdms_intensity
                 
                 #Calculate two resultant intensities: the resultant bacterial intensity 
-                #(intensity of the bacterium - the empty channel background [In theory cannot be lower than zero])...
-                subtracted_Ilastik = Ilastik_bac_intensity - Ilastik_empty_intensity
-                if subtracted_Ilastik > 0:
-                    Frame_dict[f"Well_{well}"]["Ilastik_subtracted_{}_intensity".format(bac)]= subtracted_Ilastik
+                #   (intensity of the bacterium - the empty channel background [In theory cannot be lower than zero])...
+                subtracted_ilastik = ilastik_bac_intensity - ilastik_empty_intensity
+                if subtracted_ilastik > 0:
+                    Frame_dict[f"Well_{well}"]["ilastik_subtracted_{}_intensity".format(bac)]= subtracted_ilastik
                 else:
-                    Frame_dict[f"Well_{well}"]["Ilastik_subtracted_{}_intensity".format(bac)]= 0
-                #... and the intensity of the fluid compared to the background pdms
-                fluid_Ilastik = Ilastik_empty_intensity - Ilastik_pdms_intensity
-                Frame_dict[f"Well_{well}"]["Ilastik_fluid_{}_intensity".format(bac)]= fluid_Ilastik 
+                    Frame_dict[f"Well_{well}"]["ilastik_subtracted_{}_intensity".format(bac)]= 0
+                #   ... and the intensity of the fluid compared to the background pdms
+                fluid_ilastik = ilastik_empty_intensity - ilastik_pdms_intensity
+                Frame_dict[f"Well_{well}"]["ilastik_fluid_{}_intensity".format(bac)]= fluid_ilastik 
 
     #Add this frame's dictionary to the running dictionary
     Data_Dict["Frame_{}".format(index)]= Frame_dict
     return(Data_Dict)
 
-def empty_well_props(Wells_labels, props_Wells, Imask):
+def empty_well_props(Wells_labels, props_Wells, imask):
     '''
     Determine the prescence of an empty well, as well as some of its properties
 
@@ -434,7 +536,7 @@ def empty_well_props(Wells_labels, props_Wells, Imask):
         Labelled manually-drawn well mask 
     props_Wells : list
         Properties of the sorted well masks
-    Imask : numpy.ndarray
+    imask : numpy.ndarray
         ilastik-drawn bacterial mask
 
     Returns
@@ -453,9 +555,9 @@ def empty_well_props(Wells_labels, props_Wells, Imask):
     Empty_well_x = 0
     Half_well_dx = 0
     #For each well
-    for well in range(0,int(np.amax(Wells_labels))):
-        #find each bacterium in that well
-        bac_in_well_ilastik = np.unique(Imask[Wells_labels==well+1])[1:]
+    for well in range(1,int(np.amax(Wells_labels))):
+        #Find each bacterium in that well
+        bac_in_well_ilastik = np.unique(imask[Wells_labels==well+1])[1:]
         #If there aren't any bacteria in the well
         if len(bac_in_well_ilastik) == 0:
             #Record the label and x-position of of the well
@@ -505,7 +607,7 @@ def translate_matrix(Matrix, dx,dy):
 
     return(NewMatrix)     
 
-def extract_data(Data_dictionary,imask_filename,wells_filename):
+def extract_data(Data_dictionary,imask_filename,wells_filename, fluo_filename):
     '''
     Extract data from the nested dictionary produced in the previous section
 
@@ -517,6 +619,8 @@ def extract_data(Data_dictionary,imask_filename,wells_filename):
         The path of the ilastik-generated bacterial mask file 
     wells_filename : string
         The path of the manually-generated wells mask file 
+    fluo_filename : string
+        The path of the experimentally-generated fluorescent image file 
 
     Raises
     ------
@@ -531,14 +635,14 @@ def extract_data(Data_dictionary,imask_filename,wells_filename):
         The number of frames in the images and masks used in the analysis
 
     '''
-    # extract data from masks
-    imasks_bac,imasks_frames,wellsnum = files_read(imask_filename,wells_filename)
+    #Extract data from masks
+    imasks_bac,imasks_frames,wellsnum = files_read(imask_filename,wells_filename, fluo_filename)
     
-    #create empty matrices to contain the extracted data
+    #Create empty matrices to contain the extracted data
     bac_data_tracking = np.zeros([max(imasks_bac)+1,7,imasks_frames])
     
-    #initialise the matrices with a ridiculous number
-    bac_data_tracking [:,:,:] = -1000000
+    #Initialise the matrices with a ridiculous number
+    bac_data_tracking [:,:,:] = -0.0001
     
 
     #For each frame
@@ -559,7 +663,7 @@ def extract_data(Data_dictionary,imask_filename,wells_filename):
                 bacint= [int(chunk) for chunk in data_name if chunk.isdigit()][0]
                 
                 #Look for keywords to extract data from dictionary
-                if "Ilastik" in data_name:
+                if "ilastik" in data_name:
                     if "bac" in data_name:
                         bac_data_tracking[bacint,0,framenum] = well[value]
                     elif "empty" in data_name:
@@ -583,7 +687,7 @@ def extract_data(Data_dictionary,imask_filename,wells_filename):
     print(type(bac_data_tracking))
     return(bac_data_tracking, imasks_frames)
 
-def files_read(imask_filename,wells_filename):
+def files_read(imask_filename, wells_filename, fluo_filename):
     '''
     Read the data and send both masks to be prepared. Only specific data is saved
 
@@ -593,33 +697,36 @@ def files_read(imask_filename,wells_filename):
         The path of the ilastik-generated bacterial mask file 
     wells_filename : string
         The path of the manually-generated wells mask file 
+    fluo_filename : string
+        The path of the experimentally-generated fluorescent image file 
 
     Returns
     -------
     baclist : list of integers
-        This list contains the label number of each bacterium detected by Ilastik
+        This list contains the label number of each bacterium detected by ilastik
     framenum : integer
         The number of frames in the images and masks used in the analysis
     Wellsnum : integer
         The number of wells present 
     '''
-    Imask_image = skio.imread(Input_file_paths[1])
-    Wells_image = skio.imread(Input_file_paths[2])
-        
-    #prepare wells mask
-    Wells = prep_wells(Wells_image)
+    imask_image = skio.imread(imask_filename)
+    Wells_image = skio.imread(wells_filename)
+    Fluo_image =  skio.imread(fluo_filename)  
     
-    #Fund number of wells
+    #Prepare wells mask
+    Wells = prep_wells(Wells_image,Fluo_image)
+    
+    #Find number of wells
     Wells_labels= measure.label(Wells[0])
     Wellsnum = len(np.unique(Wells_labels))-1
 
-    #prepare ilastik mask
+    #Prepare ilastik mask
     edgedist = 2
-    Imask = trim_imasks(Imask_image,edgedist)
-    Imask = imask_check_wells(Imask,Wells)
+    imask = trim_imasks(imask_image,edgedist)
+    imask = imask_check_wells(imask,Wells)
     
-    baclist = np.unique(Imask)
-    framenum = Imask.shape[0]
+    baclist = np.unique(imask)
+    framenum = imask.shape[0]
     
 
     return(baclist, framenum, Wellsnum)
@@ -651,18 +758,18 @@ def Frame_mean_plot(path, datalist, statnum, framenum, statname, xname, yname, t
     
     #Initialise an empty array to collect data
     framerange = list(range(framenum))
-    ylist_Ilastik = np.zeros(len(framerange))
+    ylist_ilastik = np.zeros(len(framerange))
     
     #For each frame, extract the mean of the data type specified by {statnum}
     for i in framerange:
-        ylist_Ilastik[i] = statistics.mean(datalist[:,statnum,i])
+        ylist_ilastik[i] = statistics.mean(datalist[:,statnum,i])
     
     #Prepare axes
-    if timeslist == False:
+    if isinstance(timeslist, bool):
        data_x =  framerange
     else:
         data_x = timeslist
-    data_y = ylist_Ilastik
+    data_y = ylist_ilastik
     
     #Send data to be plotted
     framelinegraphs(path, data_x, data_y, xname, yname, statname)
@@ -719,7 +826,7 @@ def Single_bacterium_brightness_plot(path, datalist, framenum, xname, yname, err
     #Initialise an empty matrix to collect data
     framerange = list(range(framenum))
     bacnum = len(datalist[:,0,0])
-    ylist_Ilastik = np.zeros([bacnum,len(framerange)])
+    ylist_ilastik = np.zeros([bacnum,len(framerange)])
     
     #prepare for error detection
     Error_filter = np.ones(bacnum, dtype=bool)
@@ -734,19 +841,19 @@ def Single_bacterium_brightness_plot(path, datalist, framenum, xname, yname, err
         #For each frame
         for k in framerange:
             thisframe = datalist[j,3,k]
-            #If there was no brightness data collected (value is stil at the default -1000000)
-            if thisframe == -1000000:
+            #If there was no brightness data collected (value is stil at the default -0.0001)
+            if thisframe == -0.0001:
                 #Record this as an error and set its value to zero
                 errors_tracker +=1
                 thisframe = 0
             #Record value in new matrix
-            ylist_Ilastik[j,k] = thisframe
+            ylist_ilastik[j,k] = thisframe
         #If the bacterium has had too many errors (more than error_tolerance %)
         if errors_tracker > 0.01*error_tolerance_percentage*len(framerange):
             #Mark the bacterium as problematic...
             Error_filter[j] = False
-            #...and record statistics on number of errors, number of problematic bacteria, 
-            #and number of lost non-erroneous pieces of data that belong to those bacteria.
+            #   ...and record statistics on number of errors, number of problematic bacteria, 
+            #   and number of lost non-erroneous pieces of data that belong to those bacteria.
             num_errors += errors_tracker
             num_problematic_bac += 1
             num_lost_real_data += len(framerange) - errors_tracker
@@ -754,11 +861,11 @@ def Single_bacterium_brightness_plot(path, datalist, framenum, xname, yname, err
     print(f"Errors: {num_problematic_bac} bacteria were tossed out of a total of {bacnum}, meaning that {bacnum-num_problematic_bac} bacteria are remaining. A total of {num_lost_real_data} nonzero datapoints were tossed, corresponding to {num_lost_real_data/len(framerange)} per frame. This is an error rate of {num_lost_real_data/(len(framerange)*(bacnum)-num_errors)}")
     
     #Prepare axes
-    if timeslist == False:
+    if isinstance(timeslist, bool):
        data_x =  framerange
     else:
         data_x = timeslist
-    data_y = ylist_Ilastik
+    data_y = ylist_ilastik
     
     all_bac_graphs(path, data_x,data_y,xname,yname,"all_bac_brightness", datalist, framerange, Error_filter, Removelines = True)
     all_bac_graphs(path, data_x,data_y,xname,yname,"all_bac_brightness_errors", datalist, framerange, Error_filter)
@@ -804,7 +911,7 @@ def all_bac_graphs(path, data_x,data_list_y,xname,yname,stat_name, datalist, fra
         if Error_filter[j] == True:
             plt.plot(data_x,data_list_y[j,:], color="grey")   
         #If the bacterium is problematic, plot it in red,
-        #but only if {Removelines== False}. Else don't plot it at all
+        #   but only if {Removelines== False}. Else don't plot it at all
         else: 
             if Removelines== False:
                 plt.plot(data_x,data_list_y[j,:], color="r") 
@@ -846,7 +953,7 @@ if __name__ == "__main__":
     #Find the specific paths of the three input files. 
     FluoImages= glob.glob(os.path.join(path,"*Fluo.ti*"))
     ManualWells=glob.glob(os.path.join(path,"*Channels.ti*"))
-    Masks=glob.glob(os.path.join(path,"*Ilastik.ti*"))
+    Masks=glob.glob(os.path.join(path,"*ilastik.ti*"))
     
     #Check that the right number of files has been found
     FluoImage = checksingle(FluoImages,"fluorescent")
@@ -862,7 +969,7 @@ if __name__ == "__main__":
     
     ''' Step 2: Data extraction'''
     
-    bac_data_tracking, imasks_frames = extract_data(Data_dictionary,Masks,ManualWells)
+    bac_data_tracking, imasks_frames = extract_data(Data_dictionary, imask, ManualWell, FluoImage)
     
     
     '''Step 3:  Plotting results'''
@@ -878,5 +985,4 @@ if __name__ == "__main__":
         Frame_mean_plot(path, bac_data_tracking, i, imasks_frames, stats_name_list[i], xname, yname_list[i],  timeslist)
     
     yname = "Fluorescence /a.u."
-    Single_bacterium_brightness_plot(path, bac_data_tracking,imasks_frames,timeslist)
-    
+    Single_bacterium_brightness_plot(path, bac_data_tracking, imasks_frames, xname, yname, error_tolerance_percentage = 0.2, timeslist = timeslist)
