@@ -42,6 +42,7 @@ class data_options(list):
     time_start = []
     time_stop = []
     time_unit = "min"
+    save_data = False
 
 class set_labels(QDialog):
     '''
@@ -110,79 +111,6 @@ class set_labels(QDialog):
         '''
         self.setToolTip(tool_text)
 
-class label_and_qle(QWidget):
-    '''
-    This class is used to create a label paired with a text input box, and is
-    used to allow the user to adjust options
-    '''
-    
-    def __init__(self, label, data_options, defaut, tooltip):
-        '''
-        Parameters
-        ----------
-        label : String
-            The label's text.
-        data_options : String
-            String detailing the option that the text box is linked too.
-        defaut : String
-            The default value of the text box.
-        tooltip : String
-            The text of the label's hover-over tooltip.
-        '''
-        super().__init__()
-        self.label = label
-        self.data_options = data_options
-        self.defaut = defaut
-        self.tooltip  = tooltip
-        self.initUI()
-    
-    def initUI(self):
-        '''
-        Prepare the label and text box and arrange them horizontally
-        '''
-        grid = QGridLayout()
-        self.setLayout(grid)
-
-        qle = QLineEdit(self)
-        qle.setPlaceholderText(f"default = {self.defaut}")
-        qle_label = set_labels()
-        qle_label.set_label_dynamic(self.label)
-        qle_label.set_label_tooltip(self.tooltip)
-        
-        #Stop the text box from expanding to take up the whole window
-        sizePolicy = QSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
-        qle.setSizePolicy(sizePolicy)
-
-        qle.textChanged[str].connect(self.change_options)
-        
-        grid.addWidget(qle_label, 0, 0, 1, 2)
-        grid.addWidget(qle, 0, 2, 1, 1)
-        
-    def change_options(self, text):
-        '''
-        As the user types, the relevant data_options option is updated
-
-        Parameters
-        ----------
-        text : String
-            DESCRIPTION.
-        '''
-        
-        #This is the only option for which we expect a string input, so it must be treated differently
-        if self.data_options == "data_options.time_unit":
-            data_options.time_unit = text
-        
-        #For all other cases:
-        else:
-            #If the text block is blank, reset it to its default state
-            if text == "":
-                exec(f"{self.data_options} = []")
-            #
-            else:
-                if text.isdigit() == False:
-                    print(f"Warning: {self.data_options} == {text}. This isn't a number")
-                exec(f"{self.data_options} = int({text})")
-
 class cb_col_labels(QWidget):
     '''
     This object is a widget that creates the checkbox column labels
@@ -241,7 +169,7 @@ class checkboxes(QWidget):
     
     def set_checkbox_tooltip(self, tool_text):
         '''
-        Modify the label with a hover tooltip
+        Modify the checkboxes with a hover tooltip
         '''
         self.cb0.setToolTip(tool_text)
         self.cb1.setToolTip(tool_text)
@@ -358,6 +286,134 @@ class checkboxes_gui(QWidget):
                 box_list.set_checkbox_tooltip(data_options.checkbox_rows_tooltips[i-2])
                 grid.addWidget(box_list, i, 1)
 
+class label_and_qle(QWidget):
+    '''
+    This class is used to create a label paired with a text input box, and is
+    used to allow the user to adjust options
+    '''
+    
+    def __init__(self, label, data_options, defaut, tooltip):
+        '''
+        Parameters
+        ----------
+        label : String
+            The label's text.
+        data_options : String
+            String detailing the option that the text box is linked too.
+        defaut : String
+            The default value of the text box.
+        tooltip : String
+            The text of the label's hover-over tooltip.
+        '''
+        super().__init__()
+        self.label = label
+        self.data_options = data_options
+        self.defaut = defaut
+        self.tooltip  = tooltip
+        self.initUI()
+    
+    def initUI(self):
+        '''
+        Prepare the label and text box and arrange them horizontally
+        '''
+        grid = QGridLayout()
+        self.setLayout(grid)
+
+        qle = QLineEdit(self)
+        qle.setPlaceholderText(f"default = {self.defaut}")
+        qle_label = set_labels()
+        qle_label.set_label_dynamic(self.label)
+        qle_label.set_label_tooltip(self.tooltip)
+        
+        #Stop the text box from expanding to take up the whole window
+        sizePolicy = QSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        qle.setSizePolicy(sizePolicy)
+
+        qle.textChanged[str].connect(self.change_options)
+        
+        grid.addWidget(qle_label, 0, 0, 1, 2)
+        grid.addWidget(qle, 0, 2, 1, 1)
+        
+    def change_options(self, text):
+        '''
+        As the user types, the relevant data_options option is updated
+
+        Parameters
+        ----------
+        text : String
+            DESCRIPTION.
+        '''
+        
+        #This is the only option for which we expect a string input, so it must be treated differently
+        if self.data_options == "data_options.time_unit":
+            data_options.time_unit = text
+        
+        #For all other cases:
+        else:
+            #If the text block is blank, reset it to its default state
+            if text == "":
+                exec(f"{self.data_options} = []")
+            #
+            else:
+                if text.isdigit() == False:
+                    print(f"Warning: {self.data_options} == {text}. This isn't a number")
+                exec(f"{self.data_options} = int({text})")
+
+class cb_single(QWidget):
+    ''' 
+    Create a row of two checkboxes to be used to alter options
+    '''
+    def __init__(self, label, tooltip):
+        '''
+        Parameters
+        ----------
+        row : int
+            The row at which these checkboxes were created.
+        '''
+        super().__init__()
+        self.label = label
+        self.tooltip = tooltip
+        self.initUI()
+        
+    def initUI(self):
+        ''' 
+        Prepare the grid and create two checkboxes
+        '''
+        grid = QGridLayout()
+        self.setLayout(grid)
+        
+        
+        cb_label =  set_labels()
+        cb_label.set_label_dynamic(self.label)
+        cb_label.set_label_tooltip(self.tooltip)
+        
+        self.cb = QCheckBox(self)
+        self.cb.setToolTip(self.tooltip)
+        self.cb.stateChanged.connect(self.change_options)
+        
+        grid.addWidget(cb_label, 0, 0)
+        grid.addWidget(self.cb, 0, 1)          
+    
+    def change_options(self):
+        '''
+        Once a checkbox has been ticked, change the corresponding option stored stored in data_options
+
+        Parameters
+        ----------
+        row : int
+            The row of the checkbox.
+        column : int
+            The column of the checkbox.
+        '''
+        options_data = data_options.save_data
+        
+        if options_data == False:
+            options_data = True
+        elif options_data == True: 
+            options_data = False
+            
+        data_options.save_data = options_data
+
 class misc_options_gui(QWidget):
         
     def __init__(self):
@@ -376,27 +432,30 @@ class misc_options_gui(QWidget):
         #Set the section title
         lab_title = set_labels()
         lab_title.set_label_title(data_options.misc_options_title, 300)
-        grid.addWidget(lab_title, 0, 0, 4, 1)
-        #Note that it extends downwards to contain the 
+        grid.addWidget(lab_title, 0, 0, 3, 1)
+        #Note, extends downwards to contain the text boxes
+        
+        ext_data = cb_single("Extract data?", "If ticked, data will additionally be saved as a csv. See protocol for more information.")
+        grid.addWidget(ext_data, 3, 0, 3, 1)
         
         error_tol = label_and_qle("Error tolerance ", "data_options.error_tolerance", "0 %", data_options.option_labels_tooltips[0])
-        grid.addWidget(error_tol, 5, 0)
+        grid.addWidget(error_tol, 6, 0)
                 
         spacer_label = set_labels()
         spacer_label.set_label_title("", 300)
-        grid.addWidget(spacer_label, 6, 0, 1, 1)
+        grid.addWidget(spacer_label, 7, 0, 1, 1)
 
         
         time_start = label_and_qle("Time at start ", "data_options.time_start", "0", data_options.option_labels_tooltips[1])
-        grid.addWidget(time_start, 7, 0)
+        grid.addWidget(time_start, 8, 0)
         time_stop = label_and_qle("Time at end ", "data_options.time_stop", "# of frames", data_options.option_labels_tooltips[2])
-        grid.addWidget(time_stop, 8, 0)
+        grid.addWidget(time_stop, 9, 0)
         time_units = label_and_qle("Units of time ", "data_options.time_unit", "min", data_options.option_labels_tooltips[3])
-        grid.addWidget(time_units, 9, 0)
+        grid.addWidget(time_units, 10, 0)
         
         time_label = set_labels()
-        time_label.set_label_dynamic("Note: if no final time is given, x axis will be plotted agains frame number instead of time")
-        grid.addWidget(time_label, 10, 0, 2, 1)
+        time_label.set_label_dynamic("  Note: If no final time is given, graphs will be plotted  \n          against frame number rather than time")
+        grid.addWidget(time_label, 11, 0, 2, 1)
         
         #Creat a button to set Folder destination
         set_path =  QPushButton('set folder', self)
@@ -448,7 +507,7 @@ class Options_Menu(QMainWindow):
         '''
         #If the path hasn't been set yet, promt the user to do that
         if data_options.path == []:
-            Example.get_folder()
+            Options_Menu.get_folder()
         
         else:
             #Minimise the main window, run the script, then close the window once the script has finished
@@ -479,7 +538,7 @@ def run_iMMPY():
     
     data_dictionary, image_list = iMMPY_Analysis(input_file_paths)
     
-    bac_data_tracking = extract_data(data_dictionary, image_list)
+    bac_data_tracking = extract_data(data_dictionary, image_list, path)
     
     plots(path, image_list[1], bac_data_tracking)
     
@@ -1278,7 +1337,7 @@ def collect_fluid_brightness(frame_dict, ilastik_pdms_intensity, ilastik_empty_i
     frame_dict[f"channel_{channel}"]["ilastik_fluid_{}_intensity".format(bac)] = fluid_ilastik 
     return frame_dict
 
-def extract_data(Data_dictionary, image_list):
+def extract_data(Data_dictionary, image_list, path):
     '''
     Extract data from the nested dictionary produced in the previous section
 
@@ -1289,13 +1348,15 @@ def extract_data(Data_dictionary, image_list):
     imagelist : list of numpy.ndarray
         This list contains the each image file used in the analysis: 
         the fluorescent images stack, the ilastik-generated mask, and the manually-generated channels mask
+    path : String
+        Path of directory containing the original input files.
 
     Returns
     -------
-    bac_data_tracking : matrix
+    bac_data_tracking : array
         Matrix containing each piece of extracted data
     '''
-    
+
     [fluo_image, imask, channels] = image_list 
     
     identifyer_list = data_options.names_identifyer
@@ -1333,7 +1394,36 @@ def extract_data(Data_dictionary, image_list):
                         
                         bac_data_tracking[bacint, i, frame_iter] = channel[value]
     
+    if data_options.save_data == True:
+        export_data(bac_data_tracking, path)
+    
     return(bac_data_tracking)
+
+def export_data(data, path):
+    '''
+    Changes the data from a 3D to a 2D array, then exports it as a csv file
+
+    Parameters
+    ----------
+    bac_data_tracking : array
+        Matrix containing each piece of extracted data
+    path : String
+        Path of directory containing the original input files.
+    '''
+
+    bacnum = len(data[:,1,1])
+    statnum = len(data[1,:,1])
+    framenum =len(data[1,1,:])
+    data_2D = np.zeros([bacnum,statnum*framenum])
+    for frame in range(framenum):
+        for stat in range(statnum):
+            for bac in range(bacnum):
+                #Turn [bac,stats,frames] array into [bac, [statsframe1, statsframe2, statsframe3, ...]]
+                data_2D[bac, stat+statnum*frame] = data[bac, stat, frame]
+            
+    print("Exporting data")
+    
+    np.savetxt(os.path.join(path, f"iMMPY_DataOut/exported_data.csv"), data_2D, delimiter=",")
 
 def plots(path, imask, bac_data_tracking):
     '''
