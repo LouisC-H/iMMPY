@@ -706,6 +706,8 @@ def prep_channels(channels_image, fluoimage):
         background pixels have a value of 0, whist the channel pixels have a value of 1 .
 
     '''
+    if 0 not in np.unique(channels_image):
+        channels_image = set_colour_to_zero(channels_image)
     
     # create two different binary versions of the image, one of which is the negative of the other
     channels_v1 = channels_image < 0.5
@@ -725,6 +727,35 @@ def prep_channels(channels_image, fluoimage):
     channels_binary = check_channels_duplicate(channels_binary, fluoimage)
     
     return channels_binary
+
+def set_colour_to_zero(channels_image):
+    '''
+    Set one of the colours of the binary mask to zero
+
+    Parameters
+    ----------
+    channels_image : numpy.ndarray
+        This array is the array of pixels that makes up the manually-generated channel mask
+
+    Returns
+    -------
+    zeroed_list : numpy.ndarray
+        This array is the array of pixels that makes up the manually-generated channel mask 
+           (with one colour now set to zero)
+
+    '''
+    
+    colour_numbers = np.unique(channels_image)
+    
+    if len(colour_numbers)>2:
+        raise ValueError("There are more than two colours in this image; please make sure it's monochrome")
+    
+    zero_col = min(colour_numbers)
+    
+    #Take {zero_col} away from every element of the list, setting one of the colours to zero
+    zeroed_list = channels_image - zero_col
+    
+    return(zeroed_list)
 
 def check_channels_duplicate(channels, fluoimage):
     '''
