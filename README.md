@@ -1,4 +1,4 @@
-Disclaimer: This code was written before I had had much training outside of the basics, and so it it's pretty bad quality. Appologies in advance, it's mostly written in one file =/
+Disclaimer: This code was written before I had had much training outside of the basics, and so it it's pretty bad quality. Appologies in advance, it was somehow all written in one file =/
 
 # iMMPY
 
