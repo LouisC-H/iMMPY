@@ -1,3 +1,5 @@
+Disclaimer: This code was written before I had had much training outside of the basics, and so it it's pretty bad quality. Appologies in advance, it's mostly written in one file =/
+
 # iMMPY
 
 This GitHub page contains the ilastik Mother Machine Python (iMMPY) code and protocol. Here is a guide to the files stored on this page:
@@ -11,5 +13,3 @@ This GitHub page contains the ilastik Mother Machine Python (iMMPY) code and pro
     
          It includes original experimental images, as well as a set of files already processed and ready to be input 
          to the iMMPY script (Please note that this data is derived from a failed experiment).
-
-Disclaimer: This is terrible code, and I'm sorry in advance for anyone who might be interested in reading or expanding upon it.
